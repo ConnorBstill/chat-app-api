@@ -5,9 +5,12 @@ import mysql from 'mysql2/promise';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import bodyParser from 'body-parser';
+import cookieParser from 'cookie-parser';
+
 require('dotenv').config();
 
 import { responseBuilder } from './utils/responseBuilder';
+import { encode } from 'punycode';
 
 const app = express();
 const port = 8080; // default port to listen
@@ -39,26 +42,28 @@ const pool = mysql.createPool({
 
 app.use(cors(corsOptions));
 
-app.use(bodyParser.json())
+app.use(bodyParser.json());
+
+app.use(cookieParser());
 
 app.use(async (req: any, res, next) => {
-    try {
-        req.db = await pool.getConnection();
-        req.db.connection.config.namedPlaceholders = true;
-    
-        // Traditional mode ensures not null is respected for unsupplied fields, ensures valid JavaScript dates, etc.
-        await req.db.query('SET SESSION sql_mode = "TRADITIONAL"');
-        await req.db.query(`SET time_zone = '-8:00'`);
-    
-        await next();
-    
-        req.db.release();
-      } catch (err) {
-        // If anything downstream throw an error, we must release the connection allocated for the request
-        console.log(err)
-        if (req.db) req.db.release();
-        throw err;
-      }
+  try {
+      req.db = await pool.getConnection();
+      req.db.connection.config.namedPlaceholders = true;
+  
+      // Traditional mode ensures not null is respected for unsupplied fields, ensures valid JavaScript dates, etc.
+      await req.db.query('SET SESSION sql_mode = "TRADITIONAL"');
+      await req.db.query(`SET time_zone = '-8:00'`);
+  
+      await next();
+  
+      req.db.release();
+    } catch (err) {
+      // If anything downstream throw an error, we must release the connection allocated for the request
+      console.log(err)
+      if (req.db) req.db.release();
+      throw err;
+    }
 })
 
 // define a route handler for the default home page
@@ -72,17 +77,18 @@ app.use(async (req: any, res, next) => {
 app.post('/register', async function (req: any, res) {
   try {
     let encodedUser;
+    console.log('req.body', req.body)
     // Hashes the password and inserts the info into the `user` table
     await bcrypt.hash(req.body.password, 10).then(async hash => {
       try {
         const [user] = await req.db.query(`
           INSERT INTO user (user_name, password)
-          VALUES (:userName, :password);
+          VALUES (:username, :password);
         `, {
           // email: req.body.email,
           // fname: req.body.fname,
           // lname: req.body.lname,
-          userName: req.body.userName,
+          username: req.body.username,
           password: hash
         });
 
@@ -98,40 +104,33 @@ app.post('/register', async function (req: any, res) {
       }
     });
 
+    res.cookie('user-jwt', encodedUser, {
+      httpOnly: true
+    })
 
-    res.json(encodedUser);
+    res.json(responseBuilder({}, false));
   } catch (err) {
-    console.log('err', err)
+    console.log('err', err);
+    res.json(responseBuilder(null, true));
   }
 });
 
 app.post('/authenticate', async function (req: any, res) {
   try {
-    const { userName, password } = req.body;
+    const { username, password } = req.body;
 
-    const [[user]] = await req.db.query(`
-      SELECT * FROM user WHERE user_name = :userName
-    `, {  userName });
+    const [[user]] = await req.db.query(`SELECT * FROM user WHERE user_name = :username`, {  username });
 
     if (!user) res.json('Email not found');
 
-    console.log('user', user)
-
     const dbPassword = `${user.password}`
 
-    console.log('dbPassword', dbPassword);
-
     const compare = await bcrypt.compare(password, dbPassword);
-
-    console.log('compare', compare);
 
     if (compare) {
       const payload = {
         userId: user.id,
-        email: user.email,
-        fname: user.fname,
-        lname: user.lname,
-        role: 4
+        username: user.username,
       }
       
       const encodedUser = jwt.sign(payload, process.env.JWT_KEY);
@@ -144,6 +143,44 @@ app.post('/authenticate', async function (req: any, res) {
   } catch (err) {
     console.log('Error in /auth', err)
   }
+});
+
+// Jwt verification checks to see if there is an authorization header with a valid jwt in it.
+app.use(async function verifyJwt(req: any, res, next) {
+  // console.log('REQUESTTTT', req.headers)
+  console.log('req.cookies', req.cookies);
+  if (!req.headers.authorization) {
+    res.json('Invalid authorization, no authorization headers');
+  }
+
+  const [scheme, token] = req.headers.authorization.split(' ');
+
+  if (scheme !== 'Bearer') {
+    res.json('Invalid authorization, invalid authorization scheme');
+  }
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_KEY);
+
+    req.user = payload;
+  } catch (err) {
+    if (
+      err.message && 
+      (err.message.toUpperCase() === 'INVALID TOKEN' || 
+      err.message.toUpperCase() === 'JWT EXPIRED')
+    ) {
+
+      req.status = err.status || 500;
+      req.body = err.message;
+      req.app.emit('jwt-error', err, req);
+    } else {
+
+      throw((err.status || 500), err.message);
+    }
+    console.log(err)
+  }
+
+  await next();
 });
 
 app.get('/last-messages', (req: Request, res: Response) => {
