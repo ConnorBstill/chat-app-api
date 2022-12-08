@@ -104,11 +104,11 @@ app.post('/register', async function (req: any, res) {
       }
     });
 
-    res.cookie('user-jwt', encodedUser, {
-      httpOnly: true
-    })
+    // res.cookie('user_jwt', `${encodedUser}`, {
+    //   httpOnly: true
+    // });
 
-    res.json(responseBuilder({}, false));
+    res.json(responseBuilder({ jwt: encodedUser }, false));
   } catch (err) {
     console.log('err', err);
     res.json(responseBuilder(null, true));
@@ -147,8 +147,6 @@ app.post('/authenticate', async function (req: any, res) {
 
 // Jwt verification checks to see if there is an authorization header with a valid jwt in it.
 app.use(async function verifyJwt(req: any, res, next) {
-  // console.log('REQUESTTTT', req.headers)
-  console.log('req.cookies', req.cookies);
   if (!req.headers.authorization) {
     res.json('Invalid authorization, no authorization headers');
   }
@@ -161,9 +159,9 @@ app.use(async function verifyJwt(req: any, res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_KEY);
-
     req.user = payload;
   } catch (err) {
+    console.log(err);
     if (
       err.message && 
       (err.message.toUpperCase() === 'INVALID TOKEN' || 
@@ -177,7 +175,6 @@ app.use(async function verifyJwt(req: any, res, next) {
 
       throw((err.status || 500), err.message);
     }
-    console.log(err)
   }
 
   await next();
