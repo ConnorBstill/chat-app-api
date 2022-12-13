@@ -117,14 +117,13 @@ app.post('/register', async function (req: any, res) {
 
 app.post('/authenticate', async function (req: any, res) {
   try {
+    console.log('ONE')
     const { username, password } = req.body;
-
     const [[user]] = await req.db.query(`SELECT * FROM user WHERE user_name = :username`, {  username });
 
     if (!user) res.json('Email not found');
-
+    console.log('TWO')
     const dbPassword = `${user.password}`
-
     const compare = await bcrypt.compare(password, dbPassword);
 
     if (compare) {
@@ -135,13 +134,14 @@ app.post('/authenticate', async function (req: any, res) {
       
       const encodedUser = jwt.sign(payload, process.env.JWT_KEY);
 
-      res.json(encodedUser)
+      res.json(responseBuilder({ jwt: encodedUser }, false));
+    } else {
+      res.json('Password not found');
     }
-    
-    res.json('Password not found');
+    console.log('THREE')
     
   } catch (err) {
-    console.log('Error in /auth', err)
+    console.log('Error in /authenticate', err)
   }
 });
 
@@ -180,35 +180,25 @@ app.use(async function verifyJwt(req: any, res, next) {
   await next();
 });
 
-app.get('/last-messages', (req: Request, res: Response) => {
-    try {
-        const messages = [
-            {
-                body: 'Want to see a movie friday?',
-                from: 'John',
-                date: '2022-12-01T19:24:59.210Z'
-            },
-            {
-                body: 'The new Prime password is password123456',
-                from: 'The Mom',
-                date: '2022-12-01T19:24:59.210Z'
-            },
-            {
-                body: "Yeah you should get Scarlet if she's getting Violet",
-                from: 'Jarrod',
-                date: '2022-12-01T19:24:59.210Z'
-            },
-            {
-                body: 'Ok',
-                from: 'The Dad',
-                date: '2022-12-01T19:24:59.210Z'
-            }
-        ];
-    
-        res.json(responseBuilder(messages, false));
-    } catch (err) {
-        res.json(responseBuilder(null, true));
-    }
+app.get('/last-messages', async (req: any, res: Response) => {
+  try {
+    const [lastMessages] = await req.db.query(`
+      SELECT messages.*, u.user_name AS from_user FROM messages,  
+      (
+        SELECT from_user_id, max(date_time) AS date_time FROM messages GROUP BY from_user_id
+      ) last_message
+
+      INNER JOIN user u ON last_message.from_user_id = u.id
+      WHERE messages.from_user_id = last_message.from_user_id
+      AND messages.date_time = last_message.date_time
+      AND messages.to_user_id = :userId
+    `, { userId: req.user.userId });
+  
+      res.json(responseBuilder(lastMessages, false));
+  } catch (err) {
+    console.log(err)
+      res.json(responseBuilder(null, true));
+  }
 });
 
 // start the Express server
