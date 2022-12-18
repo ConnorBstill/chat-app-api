@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express';
-import { Server } from 'ws';
+import http from 'http';
+import { Server } from 'socket.io';
+
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import jwt from 'jsonwebtoken';
@@ -12,9 +14,13 @@ require('dotenv').config();
 import { responseBuilder } from './utils/responseBuilder';
 import { encode } from 'punycode';
 
+const port = process.env.PORT;
+const socketPort = process.env.SOCKET_PORT;
+ // default port to listen
 const app = express();
-const port = 8080; // default port to listen
-const sockserver = new Server({ port: 443 });
+const socketServer = express();
+const server = http.createServer(socketServer);
+const io = new Server(server);
 
 // interface Res extends Response {
 //     db: any
@@ -46,6 +52,14 @@ app.use(bodyParser.json());
 
 app.use(cookieParser());
 
+// io.on('connection', (socket) => {
+//   console.log('CONNECTED')
+// });
+
+// io.on("connect_error", (err) => {
+//   console.log(`connect_error due to ${err.message}`);
+// });
+
 app.use(async (req: any, res, next) => {
   try {
       req.db = await pool.getConnection();
@@ -66,14 +80,6 @@ app.use(async (req: any, res, next) => {
     }
 })
 
-// define a route handler for the default home page
-
-// app.use((req, res) => res.json({ data: 'DATAAA' }));
-
-// sockserver.on('connection', (ws) => {
-//     console.log('New client connected!'); 
-//     ws.on('close', () => console.log('Client has disconnected!'));
-// });
 app.post('/register', async function (req: any, res) {
   try {
     let encodedUser;
@@ -180,6 +186,66 @@ app.use(async function verifyJwt(req: any, res, next) {
   await next();
 });
 
+app.get('/messages/:userId', async (req: any, res: Response) => {
+  console.log('messages')
+  try {
+    const { query, user } = req;
+
+    const [messages] = await req.db.query(`
+      SELECT * FROM messages
+      WHERE to_user_id = :userId
+      OR from_user_id = :fromUser
+    `, { toUser: user.userId, fromUser: query.fromUserId });
+
+    res.json(responseBuilder(messages, false));
+  } catch (err) {
+    res.json(responseBuilder(null, true));
+  }
+});
+
+app.get('/user-message-history/:interlocutorId', async (req: any, res: Response) => {
+  try {
+    const { params, user } = req;
+
+    // Interlocutor: a person who takes part in a dialogue or conversation
+    const [messages] = await req.db.query(`
+      SELECT * FROM messages
+      WHERE (to_user_id = :userId AND from_user_id = :interlocutorId)
+      OR (to_user_id = :interlocutorId AND from_user_id = :userId)
+      ORDER BY date_time ASC
+    `, { userId: user.userId, interlocutorId: params.interlocutorId });
+
+    messages.forEach((message: any) => {
+      if (message.to_user_id === user.userId) {
+        message.type = 'received';
+      } else {
+        message.type = 'sent'
+      }
+    });
+
+    res.json(responseBuilder(messages, false))
+  } catch (err) {
+
+  }
+});
+
+app.post('/send-message', async (req: any, res: Response) => {
+  try {
+    const { body, toUserId } = req.body;
+    const { userId: fromUserId, username: fromUserName } = req.user
+
+    await req.db.query(`
+      INSERT INTO messages (body, to_user_id, from_user_id, from_user_name date_time)
+      VALUES (:body, :toUserId, :fromUserId, :fromUserName, NOW())
+    `, { body, toUserId, fromUserId, fromUserName });
+
+    res.json(responseBuilder(null, false));
+  } catch (err) {
+    console.log('/send-message', err);
+    res.json(responseBuilder(null, true));
+  }
+});
+
 app.get('/last-messages', async (req: any, res: Response) => {
   try {
     const [lastMessages] = await req.db.query(`
@@ -203,5 +269,5 @@ app.get('/last-messages', async (req: any, res: Response) => {
 
 // start the Express server
 app.listen(port, () => {
-    console.log( `server started at http://localhost:${port}`);
+    console.log(`Server started at http://localhost:${port}`);
 });
