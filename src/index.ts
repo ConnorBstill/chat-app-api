@@ -135,8 +135,10 @@ app.post('/authenticate', async function (req: any, res) {
     if (compare) {
       const payload = {
         userId: user.id,
-        username: user.username,
+        username: user.user_name,
       }
+
+      console.log()
       
       const encodedUser = jwt.sign(payload, process.env.JWT_KEY);
 
@@ -235,7 +237,7 @@ app.post('/send-message', async (req: any, res: Response) => {
     const { userId: fromUserId, username: fromUserName } = req.user
 
     await req.db.query(`
-      INSERT INTO messages (body, to_user_id, from_user_id, from_user_name date_time)
+      INSERT INTO messages (body, to_user_id, from_user_id, from_user_name, date_time)
       VALUES (:body, :toUserId, :fromUserId, :fromUserName, NOW())
     `, { body, toUserId, fromUserId, fromUserName });
 
