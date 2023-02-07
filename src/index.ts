@@ -83,7 +83,7 @@ app.use(async (req: any, res, next) => {
 app.post('/register', async function (req: any, res) {
   try {
     let encodedUser;
-    console.log('req.body', req.body)
+
     // Hashes the password and inserts the info into the `user` table
     await bcrypt.hash(req.body.password, 10).then(async hash => {
       try {
@@ -123,12 +123,11 @@ app.post('/register', async function (req: any, res) {
 
 app.post('/authenticate', async function (req: any, res) {
   try {
-    console.log('ONE')
     const { username, password } = req.body;
     const [[user]] = await req.db.query(`SELECT * FROM user WHERE user_name = :username`, {  username });
 
     if (!user) res.json('Email not found');
-    console.log('TWO')
+
     const dbPassword = `${user.password}`
     const compare = await bcrypt.compare(password, dbPassword);
 
@@ -137,8 +136,6 @@ app.post('/authenticate', async function (req: any, res) {
         userId: user.id,
         username: user.user_name,
       }
-
-      console.log()
       
       const encodedUser = jwt.sign(payload, process.env.JWT_KEY);
 
